@@ -3,28 +3,18 @@ const multer = require('multer');
 const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ====== Upewnij się, że folder uploads istnieje ======
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-app.use('/uploads', express.static(uploadDir));
-
-// ====== PostgreSQL z Render ======
+// ===== PostgreSQL =====
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// ====== Tworzenie tabel jeśli nie istnieją ======
+// ===== Tworzenie tabel =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
@@ -40,17 +30,16 @@ async function initDB() {
       cooler_id INTEGER REFERENCES coolers(id),
       inspector_name TEXT,
       test_datetime TIMESTAMP,
-      photo_url TEXT
+      photo BYTEA
     );
   `);
 }
-
 initDB();
 
-// ====== Multer ======
-const upload = multer({ dest: uploadDir });
+// ===== Multer w pamięci (NIE NA DYSKU) =====
+const upload = multer({ storage: multer.memoryStorage() });
 
-// ====== Nowa próba ======
+// ===== Nowa próba =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
     const { device_name, inspector_name, photo_taken_at } = req.body;
@@ -63,13 +52,13 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     );
 
     await pool.query(
-      `INSERT INTO tests(cooler_id, inspector_name, test_datetime, photo_url)
+      `INSERT INTO tests(cooler_id, inspector_name, test_datetime, photo)
        VALUES($1,$2,$3,$4)`,
       [
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.filename
+        req.file.buffer
       ]
     );
 
@@ -80,58 +69,45 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   }
 });
 
-// ====== Lista prób ======
+// ===== Lista prób =====
 app.get('/tests', async (req, res) => {
-  try {
-    const q = await pool.query(`
-      SELECT t.id, c.device_name, c.serial_number,
-             t.inspector_name, t.test_datetime, t.photo_url
-      FROM tests t
-      JOIN coolers c ON t.cooler_id=c.id
-      ORDER BY t.id DESC
-    `);
-    res.json(q.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const q = await pool.query(`
+    SELECT t.id, c.device_name, c.serial_number,
+           t.inspector_name, t.test_datetime
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    ORDER BY t.id DESC
+  `);
+  res.json(q.rows);
 });
 
-// ====== PDF raport ======
+// ===== PDF raport =====
 app.get('/report/:id', async (req, res) => {
-  try {
-    const q = await pool.query(`
-      SELECT c.device_name, c.serial_number,
-             t.inspector_name, t.test_datetime, t.photo_url
-      FROM tests t
-      JOIN coolers c ON t.cooler_id=c.id
-      WHERE t.id=$1
-    `, [req.params.id]);
+  const q = await pool.query(`
+    SELECT c.device_name, c.serial_number,
+           t.inspector_name, t.test_datetime, t.photo
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    WHERE t.id=$1
+  `, [req.params.id]);
 
-    const row = q.rows[0];
+  const row = q.rows[0];
 
-    const doc = new PDFDocument();
-    res.setHeader('Content-Type', 'application/pdf');
-    doc.pipe(res);
+  const doc = new PDFDocument();
+  res.setHeader('Content-Type', 'application/pdf');
+  doc.pipe(res);
 
-    doc.text('PROTOKÓŁ PRÓBY SZCZELNOŚCI');
-    doc.moveDown();
-    doc.text(`Nazwa: ${row.device_name}`);
-    doc.text(`Nr seryjny: ${row.serial_number}`);
-    doc.text(`Osoba: ${row.inspector_name}`);
-    doc.text(`Data: ${row.test_datetime}`);
-    doc.moveDown();
+  doc.text('PROTOKÓŁ PRÓBY SZCZELNOŚCI');
+  doc.moveDown();
+  doc.text(`Nazwa: ${row.device_name}`);
+  doc.text(`Nr seryjny: ${row.serial_number}`);
+  doc.text(`Osoba: ${row.inspector_name}`);
+  doc.text(`Data: ${row.test_datetime}`);
+  doc.moveDown();
+  doc.image(row.photo, { width: 300 });
 
-    const imgPath = path.join(uploadDir, row.photo_url);
-    if (fs.existsSync(imgPath)) {
-      doc.image(imgPath, { width: 300 });
-    }
-
-    doc.end();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  doc.end();
 });
 
-// ====== PORT z Render ======
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API działa na ${PORT}`));
