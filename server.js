@@ -9,12 +9,11 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
+const { Pool } = require('pg');
+
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'pps',
-  password: 'AStechnik2012!',
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 const upload = multer({ dest: 'uploads/' });
