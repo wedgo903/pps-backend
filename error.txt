@@ -814,3 +814,13 @@ SyntaxError: missing ) after argument list
     at node:internal/main/run_main_module:33:47
 
 Node.js v24.13.0
+C:\pps-system\backend\node_modules\pg-pool\index.js:45
+    Error.captureStackTrace(err)
+          ^
+
+Error: The server does not support SSL connections
+    at C:\pps-system\backend\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async initDB (C:\pps-system\backend\server.js:19:3)
+
+Node.js v24.13.0
