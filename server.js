@@ -42,7 +42,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ===== Nowa próba =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
-    const { device_name, inspector_name, photo_taken_at } = req.body;
+    const device_name = req.body.device_name;
+    const inspector_name = req.body.inspector_name;
+    const photo_taken_at = req.body.photo_taken_at;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Brak zdjęcia' });
+    }
 
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
@@ -52,62 +58,19 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     );
 
     await pool.query(
-      `INSERT INTO tests(cooler_id, inspector_name, test_datetime, photo)
+      `INSERT INTO tests(cooler_id, inspector_name, test_datetime, photo_url)
        VALUES($1,$2,$3,$4)`,
       [
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer
+        req.file.path,
       ]
     );
 
     res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
   }
 });
-
-// ===== Lista prób =====
-app.get('/tests', async (req, res) => {
-  const q = await pool.query(`
-    SELECT t.id, c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    ORDER BY t.id DESC
-  `);
-  res.json(q.rows);
-});
-
-// ===== PDF raport =====
-app.get('/report/:id', async (req, res) => {
-  const q = await pool.query(`
-    SELECT c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime, t.photo
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    WHERE t.id=$1
-  `, [req.params.id]);
-
-  const row = q.rows[0];
-
-  const doc = new PDFDocument();
-  res.setHeader('Content-Type', 'application/pdf');
-  doc.pipe(res);
-
-  doc.text('PROTOKÓŁ PRÓBY SZCZELNOŚCI');
-  doc.moveDown();
-  doc.text(`Nazwa: ${row.device_name}`);
-  doc.text(`Nr seryjny: ${row.serial_number}`);
-  doc.text(`Osoba: ${row.inspector_name}`);
-  doc.text(`Data: ${row.test_datetime}`);
-  doc.moveDown();
-  doc.image(row.photo, { width: 300 });
-
-  doc.end();
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API działa na ${PORT}`));
