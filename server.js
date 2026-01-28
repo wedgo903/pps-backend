@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -12,7 +13,7 @@ app.use(express.json());
 console.log('DIRNAME:', __dirname);
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 9');
+  res.send('PPS BACKEND VERSION 10');
 });
 
 // ===== DB CONNECTION =====
@@ -93,7 +94,7 @@ app.get('/tests', async (req, res) => {
   res.json(q.rows);
 });
 
-// ===== ZDJĘCIE =====
+// ===== POBRANIE ZDJĘCIA =====
 app.get('/photo/:id', async (req, res) => {
   const q = await pool.query(
     'SELECT photo FROM tests WHERE id=$1',
@@ -102,8 +103,15 @@ app.get('/photo/:id', async (req, res) => {
 
   if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
 
+  let photo = q.rows[0].photo;
+
+  // obsługa starych rekordów
+  if (typeof photo === 'string') {
+    photo = Buffer.from(photo.replace(/^\\x/, ''), 'hex');
+  }
+
   res.setHeader('Content-Type', 'image/jpeg');
-  res.send(q.rows[0].photo);
+  res.send(photo);
 });
 
 // ===== RAPORT PDF =====
@@ -120,19 +128,25 @@ app.get('/report/:id', async (req, res) => {
 
   const row = q.rows[0];
 
+  // 🔥 obsługa starych i nowych zdjęć
+  let img = row.photo;
+  if (typeof img === 'string') {
+    img = Buffer.from(img.replace(/^\\x/, ''), 'hex');
+  }
+
   const doc = new PDFDocument({ margin: 40 });
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ✅ ABSOLUTNE ŚCIEŻKI POD RENDER
+  // ===== ŚCIEŻKI ABSOLUTNE =====
   const logoPath = path.join(__dirname, 'assets', 'logo.png');
   const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
   const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
 
-  doc.registerFont('exo', fontRegular);
-  doc.registerFont('exo-bold', fontBold);
-
-  doc.image(logoPath, 40, 30, { width: 120 });
+  // ===== BEZPIECZEŃSTWO PLIKÓW =====
+  if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
+  if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
+  if (fs.existsSync(logoPath)) doc.image(logoPath, 40, 30, { width: 120 });
 
   doc.font('exo-bold')
      .fontSize(22)
@@ -148,10 +162,10 @@ app.get('/report/:id', async (req, res) => {
      .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
   doc.moveDown(2);
-  doc.font('exo-bold').text('Zdjęcie z próby:');
+  doc.text('Zdjęcie z próby:');
   doc.moveDown();
 
-  doc.image(row.photo, { fit: [450, 350], align: 'center' });
+  doc.image(img, { fit: [450, 350], align: 'center' });
 
   doc.end();
 });
