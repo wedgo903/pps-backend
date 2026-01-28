@@ -123,7 +123,10 @@ app.get('/report/:id', async (req, res) => {
   doc.text('Zdjęcie z próby:');
   doc.moveDown();
 
-  doc.image(row.photo, { fit: [450, 350], align: 'center' });
+  // 🔥 KLUCZOWA NAPRAWA
+  const img = Buffer.from(row.photo.replace(/^\\x/, ''), 'hex');
+
+  doc.image(img, { fit: [450, 350], align: 'center' });
 
   doc.end();
 });
