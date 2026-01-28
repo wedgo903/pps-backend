@@ -125,24 +125,34 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  doc.fontSize(20).text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', { align: 'center' });
-  doc.moveDown();
+  // 🔥 KLUCZ
+  doc.registerFont('exo', './fonts/Exo2-Regular.ttf');
+  doc.registerFont('exo-bold', './fonts/Exo2-Bold.ttf');
 
-  doc.fontSize(12);
-  doc.text(`Nazwa chłodnicy: ${row.device_name}`);
-  doc.text(`Numer seryjny: ${row.serial_number}`);
-  doc.text(`Osoba sprawdzająca: ${row.inspector_name}`);
-  doc.text(`Data: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
+  doc.image('./assets/logo.png', 40, 30, { width: 120 });
+
+  doc.font('exo-bold')
+     .fontSize(22)
+     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 0, 50, { align: 'center' });
+
+  doc.moveDown(3);
+
+  doc.font('exo')
+     .fontSize(12)
+     .text(`Nazwa chłodnicy: ${row.device_name}`)
+     .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Osoba sprawdzająca: ${row.inspector_name}`)
+     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
   doc.moveDown(2);
   doc.text('Zdjęcie z próby:');
   doc.moveDown();
 
-  // ✅ TU NIC NIE KONWERTUJEMY
   doc.image(row.photo, { fit: [450, 350], align: 'center' });
 
   doc.end();
 });
+
 
 // ===== START =====
 const PORT = process.env.PORT || 3000;
