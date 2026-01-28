@@ -9,9 +9,10 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 7');
+  res.send('PPS BACKEND VERSION 8');
 });
 
+// ===== DB CONNECTION =====
 const connectionString =
   process.env.DATABASE_URL ||
   'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
@@ -23,6 +24,7 @@ const pool = new Pool({
     : false,
 });
 
+// ===== INIT DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
@@ -45,9 +47,14 @@ async function initDB() {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+// ===== NOWA PRÓBA =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
     const { device_name, inspector_name, photo_taken_at } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Brak zdjęcia' });
+    }
 
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
@@ -63,16 +70,18 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer
+        req.file.buffer   // ✅ prawidłowo
       ]
     );
 
     res.json({ ok: true });
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
+// ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
     SELECT t.id, c.device_name, c.serial_number,
@@ -85,16 +94,20 @@ app.get('/tests', async (req, res) => {
   res.json(q.rows);
 });
 
+// ===== ZDJĘCIE =====
 app.get('/photo/:id', async (req, res) => {
   const q = await pool.query(
     'SELECT photo FROM tests WHERE id=$1',
     [req.params.id]
   );
 
+  if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
+
   res.setHeader('Content-Type', 'image/jpeg');
-  res.send(q.rows[0].photo);
+  res.send(q.rows[0].photo);   // ✅ Buffer
 });
 
+// ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT c.device_name, c.serial_number,
@@ -103,6 +116,8 @@ app.get('/report/:id', async (req, res) => {
     JOIN coolers c ON t.cooler_id=c.id
     WHERE t.id=$1
   `, [req.params.id]);
+
+  if (!q.rows.length) return res.status(404).send('Brak danych');
 
   const row = q.rows[0];
 
@@ -123,14 +138,13 @@ app.get('/report/:id', async (req, res) => {
   doc.text('Zdjęcie z próby:');
   doc.moveDown();
 
-  // 🔥 KLUCZOWA NAPRAWA
-  const img = Buffer.from(row.photo.replace(/^\\x/, ''), 'hex');
-
-  doc.image(img, { fit: [450, 350], align: 'center' });
+  // ✅ TU NIC NIE KONWERTUJEMY
+  doc.image(row.photo, { fit: [450, 350], align: 'center' });
 
   doc.end();
 });
 
+// ===== START =====
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
