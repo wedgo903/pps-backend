@@ -3,7 +3,7 @@ const multer = require('multer');
 const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
-const path = require('path');   // ← TO BRAKUJE
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -12,7 +12,7 @@ app.use(express.json());
 console.log('DIRNAME:', __dirname);
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 8');
+  res.send('PPS BACKEND VERSION 9');
 });
 
 // ===== DB CONNECTION =====
@@ -55,10 +55,6 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
     const { device_name, inspector_name, photo_taken_at } = req.body;
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'Brak zdjęcia' });
-    }
-
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
        VALUES($1)
@@ -73,7 +69,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer   // ✅ prawidłowo
+        req.file.buffer
       ]
     );
 
@@ -107,7 +103,7 @@ app.get('/photo/:id', async (req, res) => {
   if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
 
   res.setHeader('Content-Type', 'image/jpeg');
-  res.send(q.rows[0].photo);   // ✅ Buffer
+  res.send(q.rows[0].photo);
 });
 
 // ===== RAPORT PDF =====
@@ -128,10 +124,15 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // 🔥 KLUCZ
-  doc.registerFont('exo', path.join(BASE, 'fonts', 'Exo2-Regular.ttf'));
-  doc.registerFont('exo-bold', path.join(BASE, 'fonts', 'Exo2-Bold.ttf'));
-  doc.image(path.join(BASE, 'assets', 'logo.png'), 40, 30, { width: 120 });
+  // ✅ ABSOLUTNE ŚCIEŻKI POD RENDER
+  const logoPath = path.join(__dirname, 'assets', 'logo.png');
+  const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
+  const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
+
+  doc.registerFont('exo', fontRegular);
+  doc.registerFont('exo-bold', fontBold);
+
+  doc.image(logoPath, 40, 30, { width: 120 });
 
   doc.font('exo-bold')
      .fontSize(22)
@@ -147,14 +148,13 @@ app.get('/report/:id', async (req, res) => {
      .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
   doc.moveDown(2);
-  doc.text('Zdjęcie z próby:');
+  doc.font('exo-bold').text('Zdjęcie z próby:');
   doc.moveDown();
 
   doc.image(row.photo, { fit: [450, 350], align: 'center' });
 
   doc.end();
 });
-
 
 // ===== START =====
 const PORT = process.env.PORT || 3000;
