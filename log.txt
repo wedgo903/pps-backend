@@ -148,3 +148,5 @@ API działa na 3000
 API działa na 3000
 API działa na 3000
 API działa na 3000
+API działa na porcie 3000
+DB connected
