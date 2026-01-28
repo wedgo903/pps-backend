@@ -3,16 +3,17 @@ const multer = require('multer');
 const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 4');
+  res.send('PPS BACKEND VERSION 5');
 });
 
-// ===== DB CONNECTION (Render + lokalnie) =====
+// ===== DB CONNECTION =====
 const connectionString =
   process.env.DATABASE_URL ||
   'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
@@ -24,7 +25,7 @@ const pool = new Pool({
     : false,
 });
 
-// ===== Tworzenie tabel jeśli nie istnieją =====
+// ===== INIT DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
@@ -45,7 +46,6 @@ async function initDB() {
   `);
 }
 
-// ===== Multer w pamięci =====
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ===== NOWA PRÓBA =====
@@ -84,113 +84,100 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 
 // ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
-  try {
-    const q = await pool.query(`
-      SELECT t.id, c.device_name, c.serial_number,
-             t.inspector_name, t.test_datetime
-      FROM tests t
-      JOIN coolers c ON t.cooler_id=c.id
-      ORDER BY t.id DESC
-    `);
+  const q = await pool.query(`
+    SELECT t.id, c.device_name, c.serial_number,
+           t.inspector_name, t.test_datetime
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    ORDER BY t.id DESC
+  `);
 
-    res.json(q.rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.json(q.rows);
 });
 
-// ===== POBIERANIE ZDJĘCIA =====
+// ===== ZDJĘCIE =====
 app.get('/photo/:id', async (req, res) => {
-  try {
-    const q = await pool.query(
-      'SELECT photo FROM tests WHERE id=$1',
-      [req.params.id]
-    );
+  const q = await pool.query(
+    'SELECT photo FROM tests WHERE id=$1',
+    [req.params.id]
+  );
 
-    if (!q.rows.length) {
-      return res.status(404).send('Brak zdjęcia');
-    }
+  if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
 
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.send(q.rows[0].photo);
-  } catch (e) {
-    res.status(500).send(e.message);
-  }
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.send(q.rows[0].photo);
 });
 
 // ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
-  try {
-    const q = await pool.query(`
-      SELECT c.device_name, c.serial_number,
-             t.inspector_name, t.test_datetime, t.photo
-      FROM tests t
-      JOIN coolers c ON t.cooler_id=c.id
-      WHERE t.id=$1
-    `, [req.params.id]);
+  const q = await pool.query(`
+    SELECT c.device_name, c.serial_number,
+           t.inspector_name, t.test_datetime, t.photo
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    WHERE t.id=$1
+  `, [req.params.id]);
 
-    if (!q.rows.length) {
-      return res.status(404).send('Brak danych');
-    }
+  if (!q.rows.length) return res.status(404).send('Brak danych');
 
-    const row = q.rows[0];
+  const row = q.rows[0];
 
-    const doc = new PDFDocument({ margin: 40 });
-    res.setHeader('Content-Type', 'application/pdf');
-    doc.pipe(res);
+  const doc = new PDFDocument({ margin: 40 });
+  res.setHeader('Content-Type', 'application/pdf');
+  doc.pipe(res);
 
-    // ===== FONTY =====
-    doc.registerFont('exo', 'fonts/Exo2-Regular.ttf');
-    doc.registerFont('exo-bold', 'fonts/Exo2-Bold.ttf');
+  // ===== FONTY (POPRAWIONE ŚCIEŻKI) =====
+  doc.registerFont(
+    'exo',
+    path.join(__dirname, 'fonts', 'Exo2-Regular.ttf')
+  );
+  doc.registerFont(
+    'exo-bold',
+    path.join(__dirname, 'fonts', 'Exo2-Bold.ttf')
+  );
 
-    // ===== LOGO =====
-    doc.image('assets/logo.png', 40, 30, { width: 120 });
+  // ===== LOGO (POPRAWIONA ŚCIEŻKA) =====
+  doc.image(
+    path.join(__dirname, 'assets', 'logo.png'),
+    40,
+    30,
+    { width: 120 }
+  );
 
-    // ===== TYTUŁ =====
-    doc.font('exo-bold')
-       .fontSize(22)
-       .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 0, 50, { align: 'center' });
+  // ===== TYTUŁ =====
+  doc.font('exo-bold')
+     .fontSize(22)
+     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 0, 50, { align: 'center' });
 
-    doc.moveDown(3);
+  doc.moveDown(3);
 
-    // ===== DANE =====
-    doc.font('exo')
-       .fontSize(12)
-       .text(`Nazwa chłodnicy: ${row.device_name}`)
-       .text(`Numer seryjny: ${row.serial_number}`)
-       .text(`Osoba sprawdzająca: ${row.inspector_name}`)
-       .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
+  // ===== DANE =====
+  doc.font('exo')
+     .fontSize(12)
+     .text(`Nazwa chłodnicy: ${row.device_name}`)
+     .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Osoba sprawdzająca: ${row.inspector_name}`)
+     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
-    doc.moveDown(2);
+  doc.moveDown(2);
 
-    // ===== ZDJĘCIE =====
-    if (row.photo) {
-      doc.font('exo-bold').text('Zdjęcie z próby:');
-      doc.moveDown();
-      doc.image(row.photo, {
-        fit: [450, 350],
-        align: 'center'
-      });
-    }
-
-    doc.end();
-  } catch (e) {
-    res.status(500).send(e.message);
+  // ===== ZDJĘCIE =====
+  if (row.photo) {
+    doc.font('exo-bold').text('Zdjęcie z próby:');
+    doc.moveDown();
+    doc.image(row.photo, {
+      fit: [450, 350],
+      align: 'center',
+    });
   }
+
+  doc.end();
 });
 
-
-// ===== START SERWERA =====
+// ===== START =====
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
   console.log(`API działa na porcie ${PORT}`);
-
-  try {
-    await initDB();
-    await pool.query('SELECT 1');
-    console.log('DB connected');
-  } catch (e) {
-    console.error('DB init error:', e.message);
-  }
+  await initDB();
 });
