@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 5');
+  res.send('PPS BACKEND VERSION 6');
 });
 
 // ===== DB CONNECTION =====
@@ -41,7 +41,7 @@ async function initDB() {
       cooler_id INTEGER REFERENCES coolers(id),
       inspector_name TEXT,
       test_datetime TIMESTAMP,
-      photo BYTEA
+      photo TEXT
     );
   `);
 }
@@ -71,7 +71,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer,
+        req.file.buffer.toString('base64') // ✅ KLUCZ
       ]
     );
 
@@ -104,8 +104,10 @@ app.get('/photo/:id', async (req, res) => {
 
   if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
 
+  const img = Buffer.from(q.rows[0].photo, 'base64');
+
   res.setHeader('Content-Type', 'image/jpeg');
-  res.send(q.rows[0].photo);
+  res.send(img);
 });
 
 // ===== RAPORT PDF =====
@@ -121,12 +123,13 @@ app.get('/report/:id', async (req, res) => {
   if (!q.rows.length) return res.status(404).send('Brak danych');
 
   const row = q.rows[0];
+  const img = Buffer.from(row.photo, 'base64');
 
   const doc = new PDFDocument({ margin: 40 });
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== FONTY (POPRAWIONE ŚCIEŻKI) =====
+  // ===== FONTY =====
   doc.registerFont(
     'exo',
     path.join(__dirname, 'fonts', 'Exo2-Regular.ttf')
@@ -136,7 +139,7 @@ app.get('/report/:id', async (req, res) => {
     path.join(__dirname, 'fonts', 'Exo2-Bold.ttf')
   );
 
-  // ===== LOGO (POPRAWIONA ŚCIEŻKA) =====
+  // ===== LOGO =====
   doc.image(
     path.join(__dirname, 'assets', 'logo.png'),
     40,
@@ -162,14 +165,12 @@ app.get('/report/:id', async (req, res) => {
   doc.moveDown(2);
 
   // ===== ZDJĘCIE =====
-  if (row.photo) {
-    doc.font('exo-bold').text('Zdjęcie z próby:');
-    doc.moveDown();
-    doc.image(row.photo, {
-      fit: [450, 350],
-      align: 'center',
-    });
-  }
+  doc.font('exo-bold').text('Zdjęcie z próby:');
+  doc.moveDown();
+  doc.image(img, {
+    fit: [450, 350],
+    align: 'center',
+  });
 
   doc.end();
 });
