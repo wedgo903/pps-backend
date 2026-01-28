@@ -15,7 +15,9 @@ app.get('/version', (req, res) => {
 // ===== PostgreSQL =====
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL.includes('render.com')
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 // ===== Tworzenie tabel =====
