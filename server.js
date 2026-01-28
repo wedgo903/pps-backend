@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 3');
+  res.send('PPS BACKEND VERSION 4');
 });
 
 // ===== DB CONNECTION (Render + lokalnie) =====
@@ -71,7 +71,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer, // zapis zdjęcia w bazie
+        req.file.buffer,
       ]
     );
 
@@ -84,49 +84,80 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 
 // ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
-  const q = await pool.query(`
-    SELECT t.id, c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    ORDER BY t.id DESC
-  `);
+  try {
+    const q = await pool.query(`
+      SELECT t.id, c.device_name, c.serial_number,
+             t.inspector_name, t.test_datetime
+      FROM tests t
+      JOIN coolers c ON t.cooler_id=c.id
+      ORDER BY t.id DESC
+    `);
 
-  res.json(q.rows);
+    res.json(q.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== POBIERANIE ZDJĘCIA =====
+app.get('/photo/:id', async (req, res) => {
+  try {
+    const q = await pool.query(
+      'SELECT photo FROM tests WHERE id=$1',
+      [req.params.id]
+    );
+
+    if (!q.rows.length) {
+      return res.status(404).send('Brak zdjęcia');
+    }
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.send(q.rows[0].photo);
+  } catch (e) {
+    res.status(500).send(e.message);
+  }
 });
 
 // ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
-  const q = await pool.query(`
-    SELECT c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime, t.photo
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    WHERE t.id=$1
-  `, [req.params.id]);
+  try {
+    const q = await pool.query(`
+      SELECT c.device_name, c.serial_number,
+             t.inspector_name, t.test_datetime, t.photo
+      FROM tests t
+      JOIN coolers c ON t.cooler_id=c.id
+      WHERE t.id=$1
+    `, [req.params.id]);
 
-  const row = q.rows[0];
+    if (!q.rows.length) {
+      return res.status(404).send('Brak danych');
+    }
 
-  const doc = new PDFDocument();
-  res.setHeader('Content-Type', 'application/pdf');
-  doc.pipe(res);
+    const row = q.rows[0];
 
-  doc.fontSize(18).text('PROTOKÓŁ PRÓBY SZCZELNOŚCI');
-  doc.moveDown();
-  doc.fontSize(12).text(`Nazwa chłodnicy: ${row.device_name}`);
-  doc.text(`Nr seryjny: ${row.serial_number}`);
-  doc.text(`Osoba sprawdzająca: ${row.inspector_name}`);
-  doc.text(`Data: ${row.test_datetime}`);
-  doc.moveDown();
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    doc.pipe(res);
 
-  if (row.photo) {
-    doc.image(row.photo, { width: 300 });
+    doc.fontSize(18).text('PROTOKÓŁ PRÓBY SZCZELNOŚCI');
+    doc.moveDown();
+    doc.fontSize(12).text(`Nazwa chłodnicy: ${row.device_name}`);
+    doc.text(`Nr seryjny: ${row.serial_number}`);
+    doc.text(`Osoba sprawdzająca: ${row.inspector_name}`);
+    doc.text(`Data: ${row.test_datetime}`);
+    doc.moveDown();
+
+    if (row.photo) {
+      doc.image(row.photo, { width: 300 });
+    }
+
+    doc.end();
+  } catch (e) {
+    res.status(500).send(e.message);
   }
-
-  doc.end();
 });
 
-// ===== START SERWERA (Render-safe) =====
+// ===== START SERWERA =====
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
