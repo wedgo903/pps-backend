@@ -128,10 +128,9 @@ app.get('/report/:id', async (req, res) => {
   doc.pipe(res);
 
   // 🔥 KLUCZ
-  doc.registerFont('exo', './fonts/Exo2-Regular.ttf');
-  doc.registerFont('exo-bold', './fonts/Exo2-Bold.ttf');
-
-  doc.image('./assets/logo.png', 40, 30, { width: 120 });
+  doc.registerFont('exo', path.join(BASE, 'fonts', 'Exo2-Regular.ttf'));
+  doc.registerFont('exo-bold', path.join(BASE, 'fonts', 'Exo2-Bold.ttf'));
+  doc.image(path.join(BASE, 'assets', 'logo.png'), 40, 30, { width: 120 });
 
   doc.font('exo-bold')
      .fontSize(22)
