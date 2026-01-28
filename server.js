@@ -13,9 +13,12 @@ app.get('/version', (req, res) => {
 });
 
 // ===== PostgreSQL =====
+const connectionString = process.env.DATABASE_URL || 
+  'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL.includes('render.com')
+  connectionString,
+  ssl: connectionString.includes('render.com')
     ? { rejectUnauthorized: false }
     : false
 });
