@@ -8,6 +8,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+console.log('DIRNAME:', __dirname);
+
 app.get('/version', (req, res) => {
   res.send('PPS BACKEND VERSION 8');
 });
