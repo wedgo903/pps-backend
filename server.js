@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 12');
+  res.send('PPS BACKEND VERSION 13');
 });
 
 // ===== DB CONNECTION =====
@@ -26,7 +26,7 @@ const pool = new Pool({
     : false,
 });
 
-// ===== INIT DB =====
+// ===== INIT / MIGRACJA DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
@@ -45,6 +45,10 @@ async function initDB() {
       photo BYTEA
     );
   `);
+
+  // 🔥 MIGRACJA — nowe pola jeśli nie istnieją
+  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS pressure_bar NUMERIC;`);
+  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS min_45_minutes BOOLEAN;`);
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -52,7 +56,24 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ===== NOWA PRÓBA =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
-    const { device_name, inspector_name, photo_taken_at } = req.body;
+    const {
+      device_name,
+      inspector_name,
+      photo_taken_at,
+      pressure_bar,
+      min_45_minutes
+    } = req.body;
+
+    // ✅ WALIDACJA CIŚNIENIA
+    if (!/^\d+(\.\d+)?$/.test(pressure_bar)) {
+      return res.status(400).json({
+        error: 'Pole "Ciśnienie (bar)" musi być liczbą'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Brak zdjęcia' });
+    }
 
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
@@ -62,13 +83,16 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     );
 
     await pool.query(
-      `INSERT INTO tests(cooler_id, inspector_name, test_datetime, photo)
-       VALUES($1,$2,$3,$4)`,
+      `INSERT INTO tests
+      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes)
+      VALUES($1,$2,$3,$4,$5,$6)`,
       [
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
-        req.file.buffer
+        req.file.buffer,
+        pressure_bar,
+        min_45_minutes === 'true'
       ]
     );
 
@@ -83,7 +107,8 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
     SELECT t.id, c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime
+           t.inspector_name, t.test_datetime,
+           t.pressure_bar, t.min_45_minutes
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     ORDER BY t.id DESC
@@ -109,7 +134,8 @@ app.get('/photo/:id', async (req, res) => {
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime, t.photo
+           t.inspector_name, t.test_datetime,
+           t.photo, t.pressure_bar, t.min_45_minutes
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     WHERE t.id=$1
@@ -124,18 +150,15 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== ŚCIEŻKI =====
+  // ===== TŁO =====
   const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
-  const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
-  const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
-
-  console.log('BG PATH:', bgPath);
-  console.log('FONT PATH:', fontRegular);
-
-  // ===== BEZPIECZEŃSTWO =====
   if (fs.existsSync(bgPath)) {
     doc.image(bgPath, 0, 0, { width: 595 });
   }
+
+  // ===== FONTY =====
+  const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
+  const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
 
   if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
   if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
@@ -152,12 +175,14 @@ app.get('/report/:id', async (req, res) => {
      .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 220)
      .text(`Numer seryjny: ${row.serial_number}`)
      .text(`Osoba sprawdzająca: ${row.inspector_name}`)
-     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
+     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
+     .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
+     .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
 
   doc.font('exo-bold')
-     .text('Zdjęcie z próby:', 50, 320);
+     .text('Zdjęcie z próby:', 50, 330);
 
-  doc.image(img, 50, 350, { fit: [500, 350] });
+  doc.image(img, 50, 360, { fit: [500, 350] });
 
   doc.end();
 });
