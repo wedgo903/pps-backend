@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8" />
+<title>PPS – Lista prób szczelności</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f6f8;
+  padding: 30px;
+}
+
+h1 {
+  margin-bottom: 20px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: white;
+}
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  background: #222;
+  color: white;
+}
+
+img {
+  max-height: 120px;
+  border-radius: 6px;
+}
+
+button {
+  padding: 8px 12px;
+  cursor: pointer;
+  border: none;
+  background: #2c7be5;
+  color: white;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #1a5dcc;
+}
+</style>
+</head>
+<body>
+
+<h1>Rejestr prób szczelności</h1>
+
+<table id="testsTable">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Chłodnica</th>
+      <th>Nr seryjny</th>
+      <th>Inspektor</th>
+      <th>Data</th>
+      <th>Bary</th>
+      <th>45 min</th>
+      <th>Zdjęcie</th>
+      <th>PDF</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const API = "https://pps-backend-l3q3.onrender.com";
+
+async function loadTests() {
+  const res = await fetch(API + "/tests");
+  const data = await res.json();
+
+  const tbody = document.querySelector("#testsTable tbody");
+
+  data.forEach(test => {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td>${test.id}</td>
+      <td>${test.device_name}</td>
+      <td>${test.serial_number}</td>
+      <td>${test.inspector_name}</td>
+      <td>${new Date(test.test_datetime).toLocaleString()}</td>
+      <td>${test.pressure_bar} bar</td>
+      <td>${test.min_45_minutes ? "TAK" : "NIE"}</td>
+      <td>
+        <img src="${API}/photo/${test.id}" />
+      </td>
+      <td>
+        <button onclick="openPdf(${test.id})">Drukuj PDF</button>
+      </td>
+    `;
+
+    tbody.appendChild(row);
+  });
+}
+
+function openPdf(id) {
+  window.open(API + "/report/" + id, "_blank");
+}
+
+loadTests();
+</script>
+
+</body>
+</html>
