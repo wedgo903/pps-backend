@@ -18,23 +18,24 @@ body{
 }
 
 /* ===== HEADER ===== */
-.header{
-  background:#072b7a;
-  color:white;
-  padding:15px 25px;
-  display:flex;
-  align-items:center;
-  gap:20px;
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #072b7a;
+  color: white;
+  padding: 20px 30px;
 }
 
-.header img{
-  height:50px;
+.header h1 {
+  margin: 0;
+  font-family: 'Exo 2', sans-serif;
+  font-size: 28px;
 }
 
-.header h1{
-  font-size:22px;
-  margin:0;
-  font-weight:600;
+.logo {
+  height: 28px;   /* 🔥 dokładnie tyle co tekst */
+  width: auto;
 }
 
 /* ===== CONTENT ===== */
@@ -123,10 +124,10 @@ button{
 
 <body>
 
-<div class="header">
-  <img src="/assets/logo.png" />
+<header class="header">
+  <img src="/img/sygnet.png" class="logo" />
   <h1>Rejestr prób szczelności chłodnic</h1>
-</div>
+</header>
 
 <div class="container">
 
