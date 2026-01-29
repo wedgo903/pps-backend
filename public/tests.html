@@ -112,6 +112,31 @@ button{
   border:10px solid white;
   border-radius:8px;
 }
+
+th, td{
+  padding:12px;
+  border-bottom:1px solid #eee;
+  font-size:14px;
+  text-align:center;          /* 🔥 wyśrodkowanie poziome */
+  vertical-align:middle;     /* 🔥 wyśrodkowanie pionowe */
+}
+
+td:last-child{
+  text-align:center;         /* kolumna z przyciskami idealnie na środku */
+}
+
+.search-bar{
+  display:flex;
+  gap:10px;
+  margin-bottom:20px;
+  align-items:center;        /* żeby select i input były równo */
+}
+
+td:first-child, th:first-child{
+  text-align:left;
+  padding-left:20px;
+}
+
 </style>
 </head>
 
