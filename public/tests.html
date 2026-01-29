@@ -5,7 +5,6 @@
 <title>PPS – Rejestr prób szczelności</title>
 
 <link rel="icon" href="/img/sygnet.png" />
-
 <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
 
 <style>
@@ -41,9 +40,10 @@ body{
 
 /* ===== SEARCH ===== */
 .search-bar {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  display:flex;
+  gap:10px;
+  margin-bottom:20px;
+  align-items:center;
 }
 
 .search-bar select,
@@ -68,6 +68,8 @@ th,td{
   padding:12px;
   border-bottom:1px solid #eee;
   font-size:14px;
+  text-align:center;
+  vertical-align:middle;
 }
 
 th{
@@ -78,6 +80,11 @@ th{
 
 tr:hover{
   background:#f7f9fc;
+}
+
+td:first-child, th:first-child{
+  text-align:left;
+  padding-left:20px;
 }
 
 /* ===== BUTTONS ===== */
@@ -112,31 +119,6 @@ button{
   border:10px solid white;
   border-radius:8px;
 }
-
-th, td{
-  padding:12px;
-  border-bottom:1px solid #eee;
-  font-size:14px;
-  text-align:center;          /* 🔥 wyśrodkowanie poziome */
-  vertical-align:middle;     /* 🔥 wyśrodkowanie pionowe */
-}
-
-td:last-child{
-  text-align:center;         /* kolumna z przyciskami idealnie na środku */
-}
-
-.search-bar{
-  display:flex;
-  gap:10px;
-  margin-bottom:20px;
-  align-items:center;        /* żeby select i input były równo */
-}
-
-td:first-child, th:first-child{
-  text-align:left;
-  padding-left:20px;
-}
-
 </style>
 </head>
 
@@ -152,6 +134,7 @@ td:first-child, th:first-child{
 <div class="search-bar">
   <select id="filterColumn">
     <option value="device_name">Nazwa chłodnicy</option>
+    <option value="medium">Medium</option>
     <option value="serial_number">Numer seryjny</option>
     <option value="inspector_name">Inspektor</option>
     <option value="pressure_bar">Ciśnienie (bar)</option>
@@ -160,7 +143,7 @@ td:first-child, th:first-child{
   <input
     type="text"
     id="searchInput"
-    placeholder="Wpisz wartość..."
+    placeholder="Wpisz wartość do filtrowania..."
     onkeyup="filterTable()"
   />
 </div>
@@ -169,6 +152,7 @@ td:first-child, th:first-child{
 <thead>
 <tr>
   <th>Chłodnica</th>
+  <th>Medium</th>
   <th>Nr seryjny</th>
   <th>Inspektor</th>
   <th>Data</th>
@@ -198,6 +182,7 @@ function renderTable(data){
 
     tr.innerHTML = `
       <td>${t.device_name}</td>
+      <td><b>${t.medium}</b></td>
       <td>${t.serial_number}</td>
       <td>${t.inspector_name}</td>
       <td>${new Date(t.test_datetime).toLocaleString()}</td>
@@ -227,6 +212,7 @@ function filterTable(){
   const filtered = allTests.filter(t => {
     switch(column){
       case "device_name": return t.device_name.toLowerCase().includes(input);
+      case "medium": return t.medium.toLowerCase().includes(input);
       case "serial_number": return t.serial_number.toString().includes(input);
       case "inspector_name": return t.inspector_name.toLowerCase().includes(input);
       case "pressure_bar": return t.pressure_bar.toString().includes(input);
