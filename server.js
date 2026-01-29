@@ -4,13 +4,14 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 11');
+  res.send('PPS BACKEND VERSION 12');
 });
 
 // ===== DB CONNECTION =====
@@ -73,6 +74,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 
     res.json({ ok: true });
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -103,7 +105,7 @@ app.get('/photo/:id', async (req, res) => {
   res.send(q.rows[0].photo);
 });
 
-// ===== RAPORT PDF NA PAPIERZE FIRMOWYM =====
+// ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT c.device_name, c.serial_number,
@@ -122,18 +124,23 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== TŁO — PAPIER FIRMOWY =====
-  const bgPath = path.join(__dirname, 'assets', 'letterhead.pdf');
-  doc.image(bgPath, 0, 0, { width: 595 });
-
-  // ===== CZCIONKI =====
+  // ===== ŚCIEŻKI =====
+  const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
   const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
   const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
 
-  doc.registerFont('exo', fontRegular);
-  doc.registerFont('exo-bold', fontBold);
+  console.log('BG PATH:', bgPath);
+  console.log('FONT PATH:', fontRegular);
 
-  // ===== TREŚĆ RAPORTU =====
+  // ===== BEZPIECZEŃSTWO =====
+  if (fs.existsSync(bgPath)) {
+    doc.image(bgPath, 0, 0, { width: 595 });
+  }
+
+  if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
+  if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
+
+  // ===== TEKST =====
   doc.fillColor('black');
 
   doc.font('exo-bold')
@@ -147,10 +154,10 @@ app.get('/report/:id', async (req, res) => {
      .text(`Osoba sprawdzająca: ${row.inspector_name}`)
      .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
-  doc.text('Zdjęcie z próby:', 50, 320);
+  doc.font('exo-bold')
+     .text('Zdjęcie z próby:', 50, 320);
 
-  const letterheadPath = path.join(__dirname, 'assets', 'letterhead.png');
-  doc.image(letterheadPath, 0, 0, { width: 595 });
+  doc.image(img, 50, 350, { fit: [500, 350] });
 
   doc.end();
 });
