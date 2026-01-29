@@ -119,6 +119,20 @@ button{
   border:10px solid white;
   border-radius:8px;
 }
+.search-bar {
+  display: flex;
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.search-bar select,
+.search-bar input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
 </style>
 </head>
 
@@ -131,12 +145,25 @@ button{
 
 <div class="container">
 
-<input id="search" placeholder="Szukaj: AS_08, numer seryjny, inspektor..." />
+<div class="search-bar">
+  <select id="filterColumn">
+    <option value="device_name">Nazwa chłodnicy</option>
+    <option value="serial_number">Numer seryjny</option>
+    <option value="inspector_name">Inspektor</option>
+    <option value="pressure_bar">Ciśnienie (bar)</option>
+  </select>
+
+  <input
+    type="text"
+    id="searchInput"
+    placeholder="Wpisz wartość..."
+    onkeyup="filterTable()"
+  />
+</div>
 
 <table id="testsTable">
 <thead>
 <tr>
-  <th>ID</th>
   <th>Chłodnica</th>
   <th>Nr seryjny</th>
   <th>Inspektor</th>
