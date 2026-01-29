@@ -4,16 +4,13 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-console.log('DIRNAME:', __dirname);
-
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 10');
+  res.send('PPS BACKEND VERSION 11');
 });
 
 // ===== DB CONNECTION =====
@@ -76,7 +73,6 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 
     res.json({ ok: true });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -103,18 +99,11 @@ app.get('/photo/:id', async (req, res) => {
 
   if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
 
-  let photo = q.rows[0].photo;
-
-  // obsługa starych rekordów
-  if (typeof photo === 'string') {
-    photo = Buffer.from(photo.replace(/^\\x/, ''), 'hex');
-  }
-
   res.setHeader('Content-Type', 'image/jpeg');
-  res.send(photo);
+  res.send(q.rows[0].photo);
 });
 
-// ===== RAPORT PDF =====
+// ===== RAPORT PDF NA PAPIERZE FIRMOWYM =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT c.device_name, c.serial_number,
@@ -127,45 +116,40 @@ app.get('/report/:id', async (req, res) => {
   if (!q.rows.length) return res.status(404).send('Brak danych');
 
   const row = q.rows[0];
+  const img = row.photo;
 
-  // 🔥 obsługa starych i nowych zdjęć
-  let img = row.photo;
-  if (typeof img === 'string') {
-    img = Buffer.from(img.replace(/^\\x/, ''), 'hex');
-  }
-
-  const doc = new PDFDocument({ margin: 40 });
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== ŚCIEŻKI ABSOLUTNE =====
-  const logoPath = path.join(__dirname, 'assets', 'logo.png');
+  // ===== TŁO — PAPIER FIRMOWY =====
+  const bgPath = path.join(__dirname, 'assets', 'letterhead.pdf');
+  doc.image(bgPath, 0, 0, { width: 595 });
+
+  // ===== CZCIONKI =====
   const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
   const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
 
-  // ===== BEZPIECZEŃSTWO PLIKÓW =====
-  if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
-  if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
-  if (fs.existsSync(logoPath)) doc.image(logoPath, 40, 30, { width: 120 });
+  doc.registerFont('exo', fontRegular);
+  doc.registerFont('exo-bold', fontBold);
+
+  // ===== TREŚĆ RAPORTU =====
+  doc.fillColor('black');
 
   doc.font('exo-bold')
-     .fontSize(22)
-     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 0, 50, { align: 'center' });
-
-  doc.moveDown(3);
+     .fontSize(20)
+     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 50, 170);
 
   doc.font('exo')
      .fontSize(12)
-     .text(`Nazwa chłodnicy: ${row.device_name}`)
+     .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 220)
      .text(`Numer seryjny: ${row.serial_number}`)
      .text(`Osoba sprawdzająca: ${row.inspector_name}`)
      .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`);
 
-  doc.moveDown(2);
-  doc.text('Zdjęcie z próby:');
-  doc.moveDown();
+  doc.text('Zdjęcie z próby:', 50, 320);
 
-  doc.image(img, { fit: [450, 350], align: 'center' });
+  doc.image(img, 50, 350, { width: 500 });
 
   doc.end();
 });
