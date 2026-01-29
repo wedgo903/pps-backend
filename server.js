@@ -149,7 +149,8 @@ app.get('/report/:id', async (req, res) => {
 
   doc.text('Zdjęcie z próby:', 50, 320);
 
-  doc.image(img, 50, 350, { width: 500 });
+  const letterheadPath = path.join(__dirname, 'assets', 'letterhead.png');
+  doc.image(letterheadPath, 0, 0, { width: 595 });
 
   doc.end();
 });
