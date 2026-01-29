@@ -12,7 +12,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 13');
+  res.send('PPS BACKEND VERSION 14');
 });
 
 // ===== DB CONNECTION =====
@@ -43,13 +43,17 @@ async function initDB() {
       cooler_id INTEGER REFERENCES coolers(id),
       inspector_name TEXT,
       test_datetime TIMESTAMP,
-      photo BYTEA
+      photo BYTEA,
+      pressure_bar NUMERIC,
+      min_45_minutes BOOLEAN,
+      medium TEXT
     );
   `);
 
-  // 🔥 MIGRACJA — nowe pola jeśli nie istnieją
+  // migracje dla starej bazy
   await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS pressure_bar NUMERIC;`);
   await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS min_45_minutes BOOLEAN;`);
+  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS medium TEXT;`);
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -62,19 +66,18 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       inspector_name,
       photo_taken_at,
       pressure_bar,
-      min_45_minutes
+      min_45_minutes,
+      medium
     } = req.body;
 
-    // ✅ WALIDACJA CIŚNIENIA
-    if (!/^\d+(\.\d+)?$/.test(pressure_bar)) {
-      return res.status(400).json({
-        error: 'Pole "Ciśnienie (bar)" musi być liczbą'
-      });
-    }
+    if (!/^\d+(\.\d+)?$/.test(pressure_bar))
+      return res.status(400).json({ error: 'Ciśnienie musi być liczbą' });
 
-    if (!req.file) {
+    if (!['OL','PO','WO','SP'].includes(medium))
+      return res.status(400).json({ error: 'Nieprawidłowe medium' });
+
+    if (!req.file)
       return res.status(400).json({ error: 'Brak zdjęcia' });
-    }
 
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
@@ -85,15 +88,16 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 
     await pool.query(
       `INSERT INTO tests
-      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes)
-      VALUES($1,$2,$3,$4,$5,$6)`,
+      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [
         cooler.rows[0].id,
         inspector_name,
         photo_taken_at,
         req.file.buffer,
         pressure_bar,
-        min_45_minutes === 'true'
+        min_45_minutes === 'true',
+        medium
       ]
     );
 
@@ -104,12 +108,12 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   }
 });
 
-// ===== LISTA TESTÓW =====
+// ===== LISTA TESTÓW (dla strony i aplikacji) =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
     SELECT t.id, c.device_name, c.serial_number,
            t.inspector_name, t.test_datetime,
-           t.pressure_bar, t.min_45_minutes
+           t.pressure_bar, t.min_45_minutes, t.medium
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     ORDER BY t.id DESC
@@ -118,7 +122,7 @@ app.get('/tests', async (req, res) => {
   res.json(q.rows);
 });
 
-// ===== POBRANIE ZDJĘCIA =====
+// ===== ZDJĘCIE =====
 app.get('/photo/:id', async (req, res) => {
   const q = await pool.query(
     'SELECT photo FROM tests WHERE id=$1',
@@ -136,7 +140,8 @@ app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT c.device_name, c.serial_number,
            t.inspector_name, t.test_datetime,
-           t.photo, t.pressure_bar, t.min_45_minutes
+           t.photo, t.pressure_bar,
+           t.min_45_minutes, t.medium
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     WHERE t.id=$1
@@ -151,20 +156,17 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== TŁO =====
   const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
   if (fs.existsSync(bgPath)) {
     doc.image(bgPath, 0, 0, { width: 595 });
   }
 
-  // ===== FONTY =====
   const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
   const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
 
   if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
   if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
 
-  // ===== TEKST =====
   doc.fillColor('black');
 
   doc.font('exo-bold')
@@ -175,15 +177,16 @@ app.get('/report/:id', async (req, res) => {
      .fontSize(12)
      .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 220)
      .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Medium: ${row.medium}`)
      .text(`Osoba sprawdzająca: ${row.inspector_name}`)
      .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
      .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
      .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
 
   doc.font('exo-bold')
-     .text('Zdjęcie z próby:', 50, 330);
+     .text('Zdjęcie z próby:', 50, 350);
 
-  doc.image(img, 50, 360, { fit: [500, 350] });
+  doc.image(img, 50, 380, { fit: [500, 320] });
 
   doc.end();
 });
