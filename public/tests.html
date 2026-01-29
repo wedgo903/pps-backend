@@ -6,7 +6,6 @@
 
 <link rel="icon" href="/img/sygnet.png" />
 
-<!-- Czcionka Exo 2 z Google -->
 <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
 
 <style>
@@ -14,7 +13,6 @@ body{
   font-family: 'Exo 2', sans-serif;
   background:#f2f2f2;
   margin:0;
-  padding:0;
 }
 
 /* ===== HEADER ===== */
@@ -29,13 +27,11 @@ body{
 
 .header h1 {
   margin: 0;
-  font-family: 'Exo 2', sans-serif;
   font-size: 28px;
 }
 
 .logo {
-  height: 28px;   /* 🔥 dokładnie tyle co tekst */
-  width: auto;
+  height: 28px;
 }
 
 /* ===== CONTENT ===== */
@@ -43,13 +39,19 @@ body{
   padding:25px;
 }
 
-#search{
+/* ===== SEARCH ===== */
+.search-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.search-bar select,
+.search-bar input {
   padding:12px;
-  width:350px;
   font-size:14px;
   border:1px solid #ccc;
   border-radius:6px;
-  margin-bottom:20px;
 }
 
 /* ===== TABLE ===== */
@@ -65,7 +67,6 @@ table{
 th,td{
   padding:12px;
   border-bottom:1px solid #eee;
-  text-align:left;
   font-size:14px;
 }
 
@@ -85,19 +86,11 @@ button{
   border:none;
   border-radius:5px;
   cursor:pointer;
-  font-family: 'Exo 2', sans-serif;
   font-weight:600;
 }
 
-.photo{
-  background:#072b7a;
-  color:white;
-}
-
-.pdf{
-  background:#a2203d;
-  color:white;
-}
+.photo{ background:#072b7a; color:white; }
+.pdf{ background:#a2203d; color:white; }
 
 /* ===== MODAL ===== */
 .modal{
@@ -150,7 +143,6 @@ button{
 <table id="testsTable">
 <thead>
 <tr>
-  <th>ID</th>
   <th>Chłodnica</th>
   <th>Nr seryjny</th>
   <th>Inspektor</th>
@@ -180,7 +172,6 @@ function renderTable(data){
     const tr = document.createElement("tr");
 
     tr.innerHTML = `
-      <td>${t.id}</td>
       <td>${t.device_name}</td>
       <td>${t.serial_number}</td>
       <td>${t.inspector_name}</td>
@@ -204,17 +195,21 @@ function showPhoto(id){
   modal.style.display = "flex";
 }
 
-document.getElementById("search").addEventListener("input", function(){
-  const val = this.value.toLowerCase();
+function filterTable(){
+  const input = document.getElementById("searchInput").value.toLowerCase();
+  const column = document.getElementById("filterColumn").value;
 
-  const filtered = allTests.filter(t =>
-    t.device_name.toLowerCase().includes(val) ||
-    t.serial_number.toString().includes(val) ||
-    t.inspector_name.toLowerCase().includes(val)
-  );
+  const filtered = allTests.filter(t => {
+    switch(column){
+      case "device_name": return t.device_name.toLowerCase().includes(input);
+      case "serial_number": return t.serial_number.toString().includes(input);
+      case "inspector_name": return t.inspector_name.toLowerCase().includes(input);
+      case "pressure_bar": return t.pressure_bar.toString().includes(input);
+    }
+  });
 
   renderTable(filtered);
-});
+}
 
 fetch('/tests')
   .then(r => r.json())
