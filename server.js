@@ -12,7 +12,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 16');
+  res.send('PPS BACKEND VERSION 17');
 });
 
 const connectionString =
@@ -49,7 +49,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Brak zdjęcia' });
 
-    // 🔥 blokada podwójnego zapisu
+    // 🔒 blokada podwójnego zapisu
     const last = await pool.query(`
       SELECT test_datetime FROM tests
       ORDER BY id DESC LIMIT 1
@@ -62,22 +62,31 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       }
     }
 
-    // 🔥 pobranie następnego numeru seryjnego
+    // 🔥 numer seryjny
     const sn = await pool.query(`SELECT nextval('tests_serial_seq') as sn`);
 
+    // 🔥 zapis coolera
+    const cooler = await pool.query(
+      `INSERT INTO coolers(device_name)
+       VALUES($1)
+       RETURNING id`,
+      [device_name]
+    );
+
+    // 🔥 zapis testu
     await pool.query(
       `INSERT INTO tests
-      (serial_number, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium, device_name)
+      (cooler_id, serial_number, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
+        cooler.rows[0].id,
         sn.rows[0].sn,
         inspector_name,
         photo_taken_at,
         req.file.buffer,
         pressure_bar,
         min_45_minutes === 'true',
-        medium,
-        device_name
+        medium
       ]
     );
 
@@ -91,11 +100,18 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
 // ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
-    SELECT id, device_name, serial_number,
-           inspector_name, test_datetime,
-           pressure_bar, min_45_minutes, medium
-    FROM tests
-    ORDER BY id DESC
+    SELECT
+      t.id,
+      c.device_name,
+      t.serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
+    FROM tests t
+    JOIN coolers c ON t.cooler_id = c.id
+    ORDER BY t.id DESC
   `);
 
   res.json(q.rows);
@@ -123,9 +139,18 @@ app.get('/photo/:id', async (req, res) => {
 // ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
-    SELECT *
-    FROM tests
-    WHERE id=$1
+    SELECT
+      c.device_name,
+      t.serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.photo,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    WHERE t.id=$1
   `, [req.params.id]);
 
   if (!q.rows.length) return res.status(404).send('Brak danych');
