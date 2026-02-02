@@ -6,42 +6,18 @@ const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
 
-console.log("🔥🔥🔥 SERVER VERSION TEST 999 🔥🔥🔥");
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
-
 const pool = new Pool({
-  connectionString,
-  ssl: connectionString.includes('render.com')
-    ? { rejectUnauthorized: false }
-    : false,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-/* ===== FUNKCJA NUMERU SERYJNEGO ===== */
-async function getNextSerialNumber() {
-  const q = await pool.query(`
-    SELECT COALESCE(
-      MIN(t1.serial_number + 1),
-      1
-    ) AS next
-    FROM tests t1
-    LEFT JOIN tests t2
-      ON t2.serial_number = t1.serial_number + 1
-    WHERE t2.serial_number IS NULL
-  `);
-  return q.rows[0].next;
-}
-
-/* ===== BLOKADA PODWÓJNEGO KLIKNIĘCIA ===== */
 let saveLock = false;
 
 /* ===== NOWA PRÓBA ===== */
@@ -61,39 +37,34 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       medium
     } = req.body;
 
-    if (!req.file)
-      return res.status(400).json({ error: 'Brak zdjęcia' });
-
-    // 🔒 Blokada duplikatu (ta sama próba w 10s)
+    // blokada duplikatu 10s
     const last = await pool.query(`
-      SELECT * FROM tests
+      SELECT test_datetime FROM tests
       ORDER BY id DESC LIMIT 1
     `);
 
     if (last.rows.length) {
       const diff = Date.now() - new Date(last.rows[0].test_datetime).getTime();
-      if (diff < 10000 && last.rows[0].device_name === device_name) {
+      if (diff < 10000) {
         saveLock = false;
         return res.status(400).json({ error: 'Ta próba została już zapisana' });
       }
     }
 
-    const serial = await getNextSerialNumber();
-
+    // numer seryjny bierze się WYŁĄCZNIE z coolers
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
        VALUES($1)
-       RETURNING id`,
+       RETURNING id, serial_number`,
       [device_name]
     );
 
     await pool.query(
       `INSERT INTO tests
-      (cooler_id, serial_number, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [
         cooler.rows[0].id,
-        serial,
         inspector_name,
         photo_taken_at,
         req.file.buffer,
@@ -104,7 +75,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     );
 
     saveLock = false;
-    res.json({ ok: true });
+    res.json({ ok: true, serial_number: cooler.rows[0].serial_number });
 
   } catch (e) {
     saveLock = false;
@@ -118,7 +89,7 @@ app.get('/tests', async (req, res) => {
     SELECT
       t.id,
       c.device_name,
-      t.serial_number,
+      c.serial_number,
       t.inspector_name,
       t.test_datetime,
       t.pressure_bar,
@@ -126,17 +97,65 @@ app.get('/tests', async (req, res) => {
       t.medium
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
-    ORDER BY t.serial_number DESC
+    ORDER BY c.serial_number DESC
   `);
 
   res.json(q.rows);
 });
 
-/* ===== USUWANIE ===== */
+/* ===== USUWANIE (usuwa też numer seryjny!) ===== */
 app.delete('/test/:id', async (req, res) => {
+  const q = await pool.query(
+    `SELECT cooler_id FROM tests WHERE id=$1`,
+    [req.params.id]
+  );
+
   await pool.query(`DELETE FROM tests WHERE id=$1`, [req.params.id]);
+  await pool.query(`DELETE FROM coolers WHERE id=$1`, [q.rows[0].cooler_id]);
+
   res.json({ ok: true });
 });
 
-/* ===== START ===== */
+/* ===== ZDJĘCIE ===== */
+app.get('/photo/:id', async (req, res) => {
+  const q = await pool.query(
+    'SELECT photo FROM tests WHERE id=$1',
+    [req.params.id]
+  );
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.send(q.rows[0].photo);
+});
+
+/* ===== PDF ===== */
+app.get('/report/:id', async (req, res) => {
+  const q = await pool.query(`
+    SELECT c.device_name, c.serial_number,
+           t.inspector_name, t.test_datetime,
+           t.photo, t.pressure_bar,
+           t.min_45_minutes, t.medium
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    WHERE t.id=$1
+  `, [req.params.id]);
+
+  const row = q.rows[0];
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  res.setHeader('Content-Type', 'application/pdf');
+  doc.pipe(res);
+
+  const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
+  if (fs.existsSync(bgPath))
+    doc.image(bgPath, 0, 0, { width: 595 });
+
+  doc.fontSize(12)
+     .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 200)
+     .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Medium: ${row.medium}`)
+     .text(`Inspektor: ${row.inspector_name}`)
+     .text(`Ciśnienie: ${row.pressure_bar} bar`)
+     .text(`45 min: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
+
+  doc.end();
+});
+
 app.listen(process.env.PORT || 3000);
