@@ -12,10 +12,9 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 14');
+  res.send('PPS BACKEND VERSION 15');
 });
 
-// ===== DB CONNECTION =====
 const connectionString =
   process.env.DATABASE_URL ||
   'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
@@ -27,20 +26,18 @@ const pool = new Pool({
     : false,
 });
 
-// ===== INIT / MIGRACJA DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
       id SERIAL PRIMARY KEY,
-      device_name TEXT,
-      serial_number SERIAL
+      device_name TEXT
     );
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tests (
       id SERIAL PRIMARY KEY,
-      cooler_id INTEGER REFERENCES coolers(id),
+      cooler_id INTEGER REFERENCES coolers(id) ON DELETE CASCADE,
       inspector_name TEXT,
       test_datetime TIMESTAMP,
       photo BYTEA,
@@ -49,14 +46,15 @@ async function initDB() {
       medium TEXT
     );
   `);
-
-  // migracje dla starej bazy
-  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS pressure_bar NUMERIC;`);
-  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS min_45_minutes BOOLEAN;`);
-  await pool.query(`ALTER TABLE tests ADD COLUMN IF NOT EXISTS medium TEXT;`);
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// ===== FUNKCJA LICZENIA NUMERU SERYJNEGO =====
+async function getNextSerial() {
+  const q = await pool.query(`SELECT COUNT(*) FROM tests`);
+  return parseInt(q.rows[0].count) + 1;
+}
 
 // ===== NOWA PRÓBA =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
@@ -79,10 +77,23 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Brak zdjęcia' });
 
+    // 🔥 BLOKADA PODWÓJNEGO ZAPISU (5 sekund)
+    const last = await pool.query(`
+      SELECT test_datetime FROM tests
+      ORDER BY id DESC LIMIT 1
+    `);
+
+    if (last.rows.length) {
+      const diff = Date.now() - new Date(last.rows[0].test_datetime).getTime();
+      if (diff < 5000) {
+        return res.status(400).json({ error: 'Ta próba została już zapisana' });
+      }
+    }
+
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
        VALUES($1)
-       RETURNING id, serial_number`,
+       RETURNING id`,
       [device_name]
     );
 
@@ -108,18 +119,30 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   }
 });
 
-// ===== LISTA TESTÓW (dla strony i aplikacji) =====
+// ===== LISTA TESTÓW Z POPRAWNYM NUMEREM SERYJNYM =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
-    SELECT t.id, c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime,
-           t.pressure_bar, t.min_45_minutes, t.medium
+    SELECT
+      t.id,
+      c.device_name,
+      ROW_NUMBER() OVER (ORDER BY t.id) AS serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     ORDER BY t.id DESC
   `);
 
   res.json(q.rows);
+});
+
+// ===== USUWANIE PRÓBY =====
+app.delete('/test/:id', async (req, res) => {
+  await pool.query(`DELETE FROM tests WHERE id=$1`, [req.params.id]);
+  res.json({ ok: true });
 });
 
 // ===== ZDJĘCIE =====
@@ -138,10 +161,15 @@ app.get('/photo/:id', async (req, res) => {
 // ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
-    SELECT c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime,
-           t.photo, t.pressure_bar,
-           t.min_45_minutes, t.medium
+    SELECT
+      c.device_name,
+      ROW_NUMBER() OVER (ORDER BY t.id) AS serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.photo,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
     FROM tests t
     JOIN coolers c ON t.cooler_id=c.id
     WHERE t.id=$1
@@ -167,8 +195,6 @@ app.get('/report/:id', async (req, res) => {
   if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
   if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
 
-  doc.fillColor('black');
-
   doc.font('exo-bold')
      .fontSize(20)
      .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 50, 170);
@@ -183,15 +209,11 @@ app.get('/report/:id', async (req, res) => {
      .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
      .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
 
-  doc.font('exo-bold')
-     .text('Zdjęcie z próby:', 50, 350);
-
   doc.image(img, 50, 380, { fit: [500, 320] });
 
   doc.end();
 });
 
-// ===== START =====
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
