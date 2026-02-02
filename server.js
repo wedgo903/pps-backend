@@ -20,6 +20,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 let saveLock = false;
 
+/* ===== WYLICZANIE NAJBLIŻSZEGO WOLNEGO NUMERU ===== */
+async function getNextSerial() {
+  const q = await pool.query(`
+    SELECT COALESCE(MIN(t1.serial_number + 1), 1) AS next
+    FROM tests t1
+    LEFT JOIN tests t2
+      ON t2.serial_number = t1.serial_number + 1
+    WHERE t2.serial_number IS NULL
+  `);
+  return q.rows[0].next;
+}
+
 /* ===== NOWA PRÓBA ===== */
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
@@ -37,45 +49,35 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       medium
     } = req.body;
 
-    // blokada duplikatu 10s
-    const last = await pool.query(`
-      SELECT test_datetime FROM tests
-      ORDER BY id DESC LIMIT 1
-    `);
+    if (!req.file)
+      throw new Error('Brak zdjęcia');
 
-    if (last.rows.length) {
-      const diff = Date.now() - new Date(last.rows[0].test_datetime).getTime();
-      if (diff < 10000) {
-        saveLock = false;
-        return res.status(400).json({ error: 'Ta próba została już zapisana' });
-      }
-    }
+    const serial = await getNextSerial();
 
-    // numer seryjny bierze się WYŁĄCZNIE z coolers
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
        VALUES($1)
-       RETURNING id, serial_number`,
+       RETURNING id`,
       [device_name]
     );
 
-    await pool.query(
-      `INSERT INTO tests
-      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
-      VALUES($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        cooler.rows[0].id,
-        inspector_name,
-        photo_taken_at,
-        req.file.buffer,
-        pressure_bar,
-        min_45_minutes === 'true',
-        medium
-      ]
-    );
+    await pool.query(`
+      INSERT INTO tests
+      (cooler_id, serial_number, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `, [
+      cooler.rows[0].id,
+      serial,
+      inspector_name,
+      photo_taken_at,
+      req.file.buffer,
+      pressure_bar,
+      min_45_minutes === 'true',
+      medium
+    ]);
 
     saveLock = false;
-    res.json({ ok: true, serial_number: cooler.rows[0].serial_number });
+    res.json({ ok: true, serial_number: serial });
 
   } catch (e) {
     saveLock = false;
@@ -89,30 +91,22 @@ app.get('/tests', async (req, res) => {
     SELECT
       t.id,
       c.device_name,
-      c.serial_number,
+      t.serial_number,
       t.inspector_name,
       t.test_datetime,
       t.pressure_bar,
       t.min_45_minutes,
       t.medium
     FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    ORDER BY c.serial_number DESC
+    JOIN coolers c ON t.cooler_id = c.id
+    ORDER BY t.serial_number DESC
   `);
-
   res.json(q.rows);
 });
 
-/* ===== USUWANIE (usuwa też numer seryjny!) ===== */
+/* ===== USUWANIE ===== */
 app.delete('/test/:id', async (req, res) => {
-  const q = await pool.query(
-    `SELECT cooler_id FROM tests WHERE id=$1`,
-    [req.params.id]
-  );
-
   await pool.query(`DELETE FROM tests WHERE id=$1`, [req.params.id]);
-  await pool.query(`DELETE FROM coolers WHERE id=$1`, [q.rows[0].cooler_id]);
-
   res.json({ ok: true });
 });
 
@@ -131,7 +125,7 @@ app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
     SELECT
       c.device_name,
-      c.serial_number,
+      t.serial_number,
       t.inspector_name,
       t.test_datetime,
       t.photo,
@@ -151,10 +145,8 @@ app.get('/report/:id', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  // ===== TŁO =====
   doc.image(path.join(__dirname, 'assets', 'letterhead.png'), 0, 0, { width: 595 });
 
-  // ===== FONTY (KLUCZ DO POLSKICH ZNAKÓW) =====
   doc.registerFont('exo', path.join(__dirname, 'fonts', 'Exo2-Regular.ttf'));
   doc.registerFont('exo-bold', path.join(__dirname, 'fonts', 'Exo2-Bold.ttf'));
 
@@ -181,6 +173,5 @@ app.get('/report/:id', async (req, res) => {
 
   doc.end();
 });
-
 
 app.listen(process.env.PORT || 3000);
