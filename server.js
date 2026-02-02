@@ -6,6 +6,8 @@ const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
 
+console.log("🔥🔥🔥 SERVER VERSION TEST 999 🔥🔥🔥");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
