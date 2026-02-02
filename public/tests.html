@@ -14,7 +14,6 @@ body{
   margin:0;
 }
 
-/* ===== HEADER ===== */
 .header {
   display: flex;
   align-items: center;
@@ -24,21 +23,11 @@ body{
   padding: 20px 30px;
 }
 
-.header h1 {
-  margin: 0;
-  font-size: 28px;
-}
+.header h1 { margin: 0; font-size: 28px; }
+.logo { height: 28px; }
 
-.logo {
-  height: 28px;
-}
+.container{ padding:25px; }
 
-/* ===== CONTENT ===== */
-.container{
-  padding:25px;
-}
-
-/* ===== SEARCH ===== */
 .search-bar {
   display:flex;
   gap:10px;
@@ -54,7 +43,6 @@ body{
   border-radius:6px;
 }
 
-/* ===== TABLE ===== */
 table{
   border-collapse: collapse;
   width:100%;
@@ -78,28 +66,26 @@ th{
   font-weight:600;
 }
 
-tr:hover{
-  background:#f7f9fc;
-}
+tr:hover{ background:#f7f9fc; }
 
 td:first-child, th:first-child{
   text-align:left;
   padding-left:20px;
 }
 
-/* ===== BUTTONS ===== */
 button{
   padding:7px 12px;
   border:none;
   border-radius:5px;
   cursor:pointer;
   font-weight:600;
+  margin:2px;
 }
 
 .photo{ background:#072b7a; color:white; }
 .pdf{ background:#a2203d; color:white; }
+.delete{ background:#444; color:white; }
 
-/* ===== MODAL ===== */
 .modal{
   display:none;
   position:fixed;
@@ -191,6 +177,7 @@ function renderTable(data){
       <td>
         <button class="photo" onclick="showPhoto(${t.id})">Zdjęcie</button>
         <button class="pdf" onclick="window.open('/report/${t.id}')">PDF</button>
+        <button class="delete" onclick="deleteTest(${t.id})">Usuń</button>
       </td>
     `;
 
@@ -222,12 +209,24 @@ function filterTable(){
   renderTable(filtered);
 }
 
-fetch('/tests')
-  .then(r => r.json())
-  .then(data => {
-    allTests = data;
-    renderTable(data);
-  });
+async function deleteTest(id){
+  if(!confirm("Na pewno usunąć tę próbę?")) return;
+
+  await fetch('/test/' + id, { method: 'DELETE' });
+
+  loadData(); // odśwież tabelę
+}
+
+function loadData(){
+  fetch('/tests')
+    .then(r => r.json())
+    .then(data => {
+      allTests = data;
+      renderTable(data);
+    });
+}
+
+loadData();
 </script>
 
 </body>
