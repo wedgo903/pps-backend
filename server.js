@@ -12,7 +12,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 15');
+  res.send('PPS BACKEND VERSION 16');
 });
 
 const connectionString =
@@ -26,35 +26,7 @@ const pool = new Pool({
     : false,
 });
 
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS coolers (
-      id SERIAL PRIMARY KEY,
-      device_name TEXT
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS tests (
-      id SERIAL PRIMARY KEY,
-      cooler_id INTEGER REFERENCES coolers(id) ON DELETE CASCADE,
-      inspector_name TEXT,
-      test_datetime TIMESTAMP,
-      photo BYTEA,
-      pressure_bar NUMERIC,
-      min_45_minutes BOOLEAN,
-      medium TEXT
-    );
-  `);
-}
-
 const upload = multer({ storage: multer.memoryStorage() });
-
-// ===== FUNKCJA LICZENIA NUMERU SERYJNEGO =====
-async function getNextSerial() {
-  const q = await pool.query(`SELECT COUNT(*) FROM tests`);
-  return parseInt(q.rows[0].count) + 1;
-}
 
 // ===== NOWA PRÓBA =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
@@ -77,7 +49,7 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Brak zdjęcia' });
 
-    // 🔥 BLOKADA PODWÓJNEGO ZAPISU (5 sekund)
+    // 🔥 blokada podwójnego zapisu
     const last = await pool.query(`
       SELECT test_datetime FROM tests
       ORDER BY id DESC LIMIT 1
@@ -90,25 +62,22 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       }
     }
 
-    const cooler = await pool.query(
-      `INSERT INTO coolers(device_name)
-       VALUES($1)
-       RETURNING id`,
-      [device_name]
-    );
+    // 🔥 pobranie następnego numeru seryjnego
+    const sn = await pool.query(`SELECT nextval('tests_serial_seq') as sn`);
 
     await pool.query(
       `INSERT INTO tests
-      (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
-      VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      (serial_number, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium, device_name)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
-        cooler.rows[0].id,
+        sn.rows[0].sn,
         inspector_name,
         photo_taken_at,
         req.file.buffer,
         pressure_bar,
         min_45_minutes === 'true',
-        medium
+        medium,
+        device_name
       ]
     );
 
@@ -119,21 +88,14 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   }
 });
 
-// ===== LISTA TESTÓW Z POPRAWNYM NUMEREM SERYJNYM =====
+// ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
-    SELECT
-      t.id,
-      c.device_name,
-      ROW_NUMBER() OVER (ORDER BY t.id) AS serial_number,
-      t.inspector_name,
-      t.test_datetime,
-      t.pressure_bar,
-      t.min_45_minutes,
-      t.medium
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    ORDER BY t.id DESC
+    SELECT id, device_name, serial_number,
+           inspector_name, test_datetime,
+           pressure_bar, min_45_minutes, medium
+    FROM tests
+    ORDER BY id DESC
   `);
 
   res.json(q.rows);
@@ -161,24 +123,14 @@ app.get('/photo/:id', async (req, res) => {
 // ===== RAPORT PDF =====
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
-    SELECT
-      c.device_name,
-      ROW_NUMBER() OVER (ORDER BY t.id) AS serial_number,
-      t.inspector_name,
-      t.test_datetime,
-      t.photo,
-      t.pressure_bar,
-      t.min_45_minutes,
-      t.medium
-    FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    WHERE t.id=$1
+    SELECT *
+    FROM tests
+    WHERE id=$1
   `, [req.params.id]);
 
   if (!q.rows.length) return res.status(404).send('Brak danych');
 
   const row = q.rows[0];
-  const img = row.photo;
 
   const doc = new PDFDocument({ size: 'A4', margin: 0 });
   res.setHeader('Content-Type', 'application/pdf');
@@ -202,21 +154,20 @@ app.get('/report/:id', async (req, res) => {
   doc.font('exo')
      .fontSize(12)
      .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 220)
-     .text(`Numer seryjny: ${row.serial_number}`)
-     .text(`Medium: ${row.medium}`)
-     .text(`Osoba sprawdzająca: ${row.inspector_name}`)
-     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
-     .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
-     .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
+     .text(`Numer seryjny: ${row.serial_number}`, 50, 240)
+     .text(`Medium: ${row.medium}`, 50, 260)
+     .text(`Osoba sprawdzająca: ${row.inspector_name}`, 50, 280)
+     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`, 50, 300)
+     .text(`Ciśnienie próby: ${row.pressure_bar} bar`, 50, 320)
+     .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`, 50, 340);
 
-  doc.image(img, 50, 380, { fit: [500, 320] });
+  doc.image(row.photo, 50, 380, { fit: [500, 320] });
 
   doc.end();
 });
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, async () => {
-  await initDB();
+app.listen(PORT, () => {
   console.log('API działa');
 });
