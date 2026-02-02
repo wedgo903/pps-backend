@@ -12,20 +12,27 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/version', (req, res) => {
-  res.send('PPS BACKEND VERSION 17');
+  res.send('PPS BACKEND FINAL');
 });
+
+// ===== DB =====
+const connectionString =
+  process.env.DATABASE_URL ||
+  'postgresql://postgres:AStechnik2012!@localhost:5432/postgres';
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  connectionString,
+  ssl: connectionString.includes('render.com')
+    ? { rejectUnauthorized: false }
+    : false,
 });
 
+// ===== INIT DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS coolers (
       id SERIAL PRIMARY KEY,
-      device_name TEXT,
-      serial_number SERIAL UNIQUE
+      device_name TEXT
     );
   `);
 
@@ -33,6 +40,7 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS tests (
       id SERIAL PRIMARY KEY,
       cooler_id INTEGER REFERENCES coolers(id) ON DELETE CASCADE,
+      serial_number SERIAL,
       inspector_name TEXT,
       test_datetime TIMESTAMP,
       photo BYTEA,
@@ -45,6 +53,7 @@ async function initDB() {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+// ===== NOWA PRÓBA =====
 app.post('/new-test', upload.single('photo'), async (req, res) => {
   try {
     const {
@@ -56,6 +65,15 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       medium
     } = req.body;
 
+    if (!req.file)
+      return res.status(400).json({ error: 'Brak zdjęcia' });
+
+    if (!/^\d+(\.\d+)?$/.test(pressure_bar))
+      return res.status(400).json({ error: 'Ciśnienie musi być liczbą' });
+
+    if (!['OL','PO','WO','SP'].includes(medium))
+      return res.status(400).json({ error: 'Nieprawidłowe medium' });
+
     const cooler = await pool.query(
       `INSERT INTO coolers(device_name)
        VALUES($1)
@@ -63,19 +81,20 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
       [device_name]
     );
 
-    await pool.query(`
-      INSERT INTO tests
+    await pool.query(
+      `INSERT INTO tests
       (cooler_id, inspector_name, test_datetime, photo, pressure_bar, min_45_minutes, medium)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
-    `, [
-      cooler.rows[0].id,
-      inspector_name,
-      photo_taken_at,
-      req.file.buffer,
-      pressure_bar,
-      min_45_minutes === 'true',
-      medium
-    ]);
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        cooler.rows[0].id,
+        inspector_name,
+        photo_taken_at,
+        req.file.buffer,
+        pressure_bar,
+        min_45_minutes === 'true',
+        medium
+      ]
+    );
 
     res.json({ ok: true });
   } catch (e) {
@@ -84,31 +103,104 @@ app.post('/new-test', upload.single('photo'), async (req, res) => {
   }
 });
 
+// ===== LISTA TESTÓW =====
 app.get('/tests', async (req, res) => {
   const q = await pool.query(`
     SELECT
       t.id,
       c.device_name,
-      c.serial_number,
+      t.serial_number,
       t.inspector_name,
       t.test_datetime,
       t.pressure_bar,
       t.min_45_minutes,
       t.medium
     FROM tests t
-    JOIN coolers c ON t.cooler_id = c.id
-    ORDER BY t.id DESC
+    JOIN coolers c ON t.cooler_id=c.id
+    ORDER BY t.serial_number DESC
   `);
 
   res.json(q.rows);
 });
 
+// ===== USUWANIE =====
 app.delete('/test/:id', async (req, res) => {
-  await pool.query('DELETE FROM tests WHERE id=$1', [req.params.id]);
+  await pool.query(`DELETE FROM tests WHERE id=$1`, [req.params.id]);
   res.json({ ok: true });
 });
 
+// ===== ZDJĘCIE =====
+app.get('/photo/:id', async (req, res) => {
+  const q = await pool.query(
+    'SELECT photo FROM tests WHERE id=$1',
+    [req.params.id]
+  );
+
+  if (!q.rows.length) return res.status(404).send('Brak zdjęcia');
+
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.send(q.rows[0].photo);
+});
+
+// ===== PDF =====
+app.get('/report/:id', async (req, res) => {
+  const q = await pool.query(`
+    SELECT
+      c.device_name,
+      t.serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.photo,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
+    FROM tests t
+    JOIN coolers c ON t.cooler_id=c.id
+    WHERE t.id=$1
+  `, [req.params.id]);
+
+  if (!q.rows.length) return res.status(404).send('Brak danych');
+
+  const row = q.rows[0];
+  const img = row.photo;
+
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  res.setHeader('Content-Type', 'application/pdf');
+  doc.pipe(res);
+
+  const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
+  if (fs.existsSync(bgPath)) {
+    doc.image(bgPath, 0, 0, { width: 595 });
+  }
+
+  const fontRegular = path.join(__dirname, 'fonts', 'Exo2-Regular.ttf');
+  const fontBold = path.join(__dirname, 'fonts', 'Exo2-Bold.ttf');
+
+  if (fs.existsSync(fontRegular)) doc.registerFont('exo', fontRegular);
+  if (fs.existsSync(fontBold)) doc.registerFont('exo-bold', fontBold);
+
+  doc.font('exo-bold')
+     .fontSize(20)
+     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 50, 170);
+
+  doc.font('exo')
+     .fontSize(12)
+     .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 220)
+     .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Medium: ${row.medium}`)
+     .text(`Osoba sprawdzająca: ${row.inspector_name}`)
+     .text(`Data wykonania próby: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
+     .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
+     .text(`Czas próby min. 45 minut: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
+
+  doc.image(img, 50, 380, { fit: [500, 320] });
+
+  doc.end();
+});
+
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, async () => {
   await initDB();
+  console.log('API działa FINAL');
 });
