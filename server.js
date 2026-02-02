@@ -129,33 +129,58 @@ app.get('/photo/:id', async (req, res) => {
 /* ===== PDF ===== */
 app.get('/report/:id', async (req, res) => {
   const q = await pool.query(`
-    SELECT c.device_name, c.serial_number,
-           t.inspector_name, t.test_datetime,
-           t.photo, t.pressure_bar,
-           t.min_45_minutes, t.medium
+    SELECT
+      c.device_name,
+      c.serial_number,
+      t.inspector_name,
+      t.test_datetime,
+      t.photo,
+      t.pressure_bar,
+      t.min_45_minutes,
+      t.medium
     FROM tests t
-    JOIN coolers c ON t.cooler_id=c.id
-    WHERE t.id=$1
+    JOIN coolers c ON t.cooler_id = c.id
+    WHERE t.id = $1
   `, [req.params.id]);
 
+  if (!q.rows.length) return res.status(404).send('Brak danych');
+
   const row = q.rows[0];
+
   const doc = new PDFDocument({ size: 'A4', margin: 0 });
   res.setHeader('Content-Type', 'application/pdf');
   doc.pipe(res);
 
-  const bgPath = path.join(__dirname, 'assets', 'letterhead.png');
-  if (fs.existsSync(bgPath))
-    doc.image(bgPath, 0, 0, { width: 595 });
+  // ===== TŁO =====
+  doc.image(path.join(__dirname, 'assets', 'letterhead.png'), 0, 0, { width: 595 });
 
-  doc.fontSize(12)
-     .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 200)
+  // ===== FONTY (KLUCZ DO POLSKICH ZNAKÓW) =====
+  doc.registerFont('exo', path.join(__dirname, 'fonts', 'Exo2-Regular.ttf'));
+  doc.registerFont('exo-bold', path.join(__dirname, 'fonts', 'Exo2-Bold.ttf'));
+
+  doc.fillColor('black');
+
+  doc.font('exo-bold')
+     .fontSize(20)
+     .text('PROTOKÓŁ PRÓBY SZCZELNOŚCI', 50, 160);
+
+  doc.font('exo')
+     .fontSize(12)
+     .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 210)
      .text(`Numer seryjny: ${row.serial_number}`)
      .text(`Medium: ${row.medium}`)
      .text(`Inspektor: ${row.inspector_name}`)
-     .text(`Ciśnienie: ${row.pressure_bar} bar`)
-     .text(`45 min: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
+     .text(`Data: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
+     .text(`Ciśnienie próby: ${row.pressure_bar} bar`)
+     .text(`Czas próby min. 45 min: ${row.min_45_minutes ? 'TAK' : 'NIE'}`);
+
+  doc.font('exo-bold')
+     .text('Zdjęcie z próby:', 50, 320);
+
+  doc.image(row.photo, 50, 350, { fit: [500, 300] });
 
   doc.end();
 });
+
 
 app.listen(process.env.PORT || 3000);
