@@ -159,7 +159,7 @@ app.get('/report/:id', async (req, res) => {
   doc.font('exo')
      .fontSize(12)
      .text(`Nazwa chłodnicy: ${row.device_name}`, 50, 210)
-     .text(`Numer seryjny: ${row.serial_number}`)
+     .text(`Numer modułu: ${row.serial_number}`)
      .text(`Medium: ${row.medium}`)
      .text(`Inspektor: ${row.inspector_name}`)
      .text(`Data: ${new Date(row.test_datetime).toLocaleString('pl-PL')}`)
